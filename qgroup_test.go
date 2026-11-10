@@ -1,22 +1,3 @@
-/*
- * Copyright (C) 2022 Jana Marlou Rettig
- *
- * This file is part of libbtrfsutil-go.
- *
- * libbtrfsutil-go is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License as published by
- * the Free Software Foundation, either version 2.1 of the License, or
- * (at your option) any later version.
- *
- * libbtrfsutil-go is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public License
- * along with libbtrfsutil-go.  If not, see <http://www.gnu.org/licenses/>.
- */
-
 package btrfsutil
 
 import (
@@ -24,31 +5,47 @@ import (
 	"testing"
 )
 
-func TestQgroupInherit(t *testing.T) {
-	tests := []struct {
-		name string
-		want []uint64
-	}{
-		{"1,2", []uint64{1, 2}},
-		{"77,934,3", []uint64{77, 934, 3}},
+func TestNewQgroupInherit(t *testing.T) {
+	q, err := NewQgroupInherit()
+	if err != nil {
+		t.Fatalf("NewQgroupInherit() error = %v", err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			inherit, err := CreateQgroupInherit()
-			if err != nil {
-				t.Errorf("CreateQgroupInherit() error = %v", err)
-			}
-			defer inherit.Destroy()
+	defer q.Close()
 
-			for _, i := range tt.want {
-				if err := inherit.AddGroup(i); err != nil {
-					t.Errorf("QgroupInherit.AddGroup(%v) error = %v", i, err)
-				}
-			}
+	if got := q.GetGroups(); len(got) != 0 {
+		t.Fatalf("initial groups = %v, want empty", got)
+	}
+}
 
-			if got := inherit.GetGroups(); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("QgroupInherit.GetGroups() = %v, want %v", got, tt.want)
-			}
-		})
+func TestQgroupInheritAddGroup(t *testing.T) {
+	q, err := NewQgroupInherit()
+	if err != nil {
+		t.Fatalf("NewQgroupInherit() error = %v", err)
+	}
+	defer q.Close()
+
+	want := []uint64{1, 256, 1001}
+	for _, id := range want {
+		if err := q.AddGroup(id); err != nil {
+			t.Fatalf("AddGroup(%d) error = %v", id, err)
+		}
+	}
+
+	if got := q.GetGroups(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetGroups() = %v, want %v", got, want)
+	}
+}
+
+func TestQgroupInheritCloseIsIdempotent(t *testing.T) {
+	q, err := NewQgroupInherit()
+	if err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
+
+	q.Close()
+	q.Close() // Must not panic
+
+	if q.cPtr != nil {
+		t.Fatalf("pointer was not cleared")
 	}
 }

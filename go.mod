@@ -1,3 +1,3 @@
-module github.com/sapphic-kitten/libbtrfsutil-go
+module github.com/sapphic-kitten/btrfsutil-go
 
-go 1.19
+go 1.27

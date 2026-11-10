@@ -1,20 +1,20 @@
 /*
  * Copyright (C) 2022 Jana Marlou Rettig
  *
- * This file is part of libbtrfsutil-go.
+ * This file is part of btrfsutil-go.
  *
- * libbtrfsutil-go is free software: you can redistribute it and/or modify
+ * btrfsutil-go is free software: you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License as published by
  * the Free Software Foundation, either version 2.1 of the License, or
  * (at your option) any later version.
  *
- * libbtrfsutil-go is distributed in the hope that it will be useful,
+ * btrfsutil-go is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public License
- * along with libbtrfsutil-go.  If not, see <http://www.gnu.org/licenses/>.
+ * along with btrfsutil-go.  If not, see <http://www.gnu.org/licenses/>.
  */
 
 package btrfsutil
@@ -24,166 +24,172 @@ package btrfsutil
 // #include <btrfsutil.h>
 import "C"
 import (
+	"errors"
+	"iter"
 	"unsafe"
 )
 
-type SubvolumeIteratorResult struct {
-	Path string
-	Id   uint64
-}
-
-type SubvolumeInfoIteratorResult struct {
-	Path string
-	Info *SubvolumeInfo
-}
-
+// SubvolumeIterator is an iterator over the subvolumes in a Btrfs filesystem.
+// It is created by NewSubvolumeIterator or NewSubvolumeIteratorFd and holds an
+// open C iterator until it is destroyed by Close; list iteration closes the
+// iterator automatically when it finishes or fails. Close needs to be
+// called explicitly when iteration is stopped early. See NewSubvolumeIterator,
+// ListSubvolumes and Close for more details.
 type SubvolumeIterator struct {
-	lastResult *SubvolumeIteratorResult
-	lastErr    error
-
-	iterator *C.struct_btrfs_util_subvolume_iterator
+	cPtr *C.struct_btrfs_util_subvolume_iterator
+	err  error
 }
 
-// CreateSubvolumeIterator creates an iterator over subvolumes in a Btrfs filesystem.
-// Lists all subvolumes beneath (but not including) the subvolume with the ID top.
-// The given path may be any path in the Btrfs filesystem; it dose not have to
-// refer to a subvolume unless top is zero. If the as top given ID is zero,
-// the subvolume ID of the subvolume containing path is used.
-// By default subvolumes are listed pre-order e.g., foo will be yielded before foo/bar.
-// This behavior can be reversed by setting post_order.
-// The returned SubvolumeIterator struct must be freed with Destroy().
-func CreateSubvolumeIterator(path string, top uint64, post_order bool) (*SubvolumeIterator, error) {
-	it := new(SubvolumeIterator)
+// NewSubvolumeIterator creates an iterator over the subvolumes in a Btrfs
+// filesystem. The returned iterator holds an open C iterator and must be
+// destroyed with Close()
+//
+// path may be any path in a Btrfs filesystem; it does not have to refer to a
+// subvolume unless topId is zero. topId is the ID of the subvolume beneath
+// which (but not including) subvolumes will be listed; if zero is given, the
+// subvolume ID of path is used. To list all subvolumes, pass the ID of the root
+// subvolume, BTRFS_FS_TREE_OBJECTID (i.e., 5); the returned paths are then
+// relative to the subvolume with this ID. If postOrder is true, subvolumes are
+// yielded post-order, so foo/bar is yielded before foo; the default is
+// pre-order, where foo is yielded before foo/bar.
+//
+// This requires appropriate privilege (CAP_SYS_ADMIN) unless topId is zero and
+// the kernel supports BTRFS_IOC_GET_SUBVOL_ROOTREF and BTRFS_IOC_INO_LOOKUP_USER
+// (kernel >= 4.18). In the latter case, subvolumes which cannot be accessed
+// (e.g., due to permissions or other mounts) are silently skipped.
+func NewSubvolumeIterator(path string, topId uint64, postOrder bool) (*SubvolumeIterator, error) {
+	si := new(SubvolumeIterator)
 
-	Cpath := C.CString(path)
-	defer C.free(unsafe.Pointer(Cpath))
+	cPath := C.CString(path)
+	defer C.free(unsafe.Pointer(cPath))
 
 	flags := 0
-	if post_order {
+	if postOrder {
 		flags |= C.BTRFS_UTIL_SUBVOLUME_ITERATOR_POST_ORDER
 	}
 
-	err := getError(C.btrfs_util_create_subvolume_iterator(Cpath, C.uint64_t(top), C.int(flags), &it.iterator))
-	return it, err
+	cError, err := C.btrfs_util_subvolume_iter_create(cPath, C.uint64_t(topId), C.int(flags), &si.cPtr)
+	return si, wrapCError(cError, err)
 }
 
-// See CreateSubvolumeIterator.
-func CreateSubvolumeIteratorFd(fd uintptr, top uint64, post_order bool) (*SubvolumeIterator, error) {
-	it := new(SubvolumeIterator)
+// NewSubvolumeIteratorFd creates an iterator over the subvolumes in a Btrfs
+// filesystem.
+//
+// fd may be the file descriptor for any object on the filesystem.
+// See NewSubvolumeIterator for details.
+func NewSubvolumeIteratorFd(fd uintptr, topId uint64, postOrder bool) (*SubvolumeIterator, error) {
+	si := new(SubvolumeIterator)
 
 	flags := 0
-	if post_order {
+	if postOrder {
 		flags |= C.BTRFS_UTIL_SUBVOLUME_ITERATOR_POST_ORDER
 	}
 
-	err := getError(C.btrfs_util_create_subvolume_iterator_fd(C.int(fd), C.uint64_t(top), C.int(flags), &it.iterator))
-	return it, err
+	cError, err := C.btrfs_util_subvolume_iter_create_fd(C.int(fd), C.uint64_t(topId), C.int(flags), &si.cPtr)
+	return si, wrapCError(cError, err)
 }
 
-// Fd returns the file descriptor referencing the SubvolumeIterator
-func (it *SubvolumeIterator) Fd() uintptr {
-	return uintptr(C.btrfs_util_subvolume_iterator_fd(it.iterator))
-}
+// ListSubvolumes returns an iter.Seq2 which yields the path and ID of each
+// (remaining) subvolume.
+//
+// Paths are relative to the subvolume ID used to create the iterator. Any error
+// is recorded in the iterator; see NewSubvolumeIterator and Err for details.
+func (si *SubvolumeIterator) ListSubvolumes() iter.Seq2[string, uint64] {
+	return func(yield func(string, uint64) bool) {
+		for si.cPtr != nil {
+			var cPath *C.char
+			defer C.free(unsafe.Pointer(cPath))
 
-// Destroy destroys the SubvolumeIterator.
-func (it *SubvolumeIterator) Destroy() {
-	C.btrfs_util_destroy_subvolume_iterator(it.iterator)
-	it.iterator = nil
-}
+			var cId C.uint64_t
 
-// HasNext returns true if the SubvolumeIterator has a next value.
-func (it *SubvolumeIterator) HasNext() bool {
-	var Cpath *C.char
-	defer C.free(unsafe.Pointer(Cpath))
+			cError, err := C.btrfs_util_subvolume_iter_next(si.cPtr, &cPath, &cId)
+			if cError != C.BTRFS_UTIL_OK {
+				si.err = wrapCError(cError, err)
+				return
+			}
 
-	var id C.uint64_t
-	it.lastErr = getError(C.btrfs_util_subvolume_iterator_next(it.iterator, &Cpath, &id))
-	if it.lastErr == ErrStopIteration {
-		it.lastResult = nil
-		return false
+			if !yield(C.GoString(cPath), uint64(cId)) {
+				return
+			}
+		}
 	}
-
-	it.lastResult = &SubvolumeIteratorResult{C.GoString(Cpath), uint64(id)}
-	return true
 }
 
-// GetNext gets the Path and Id of the next subvolume from a SubvolumeIterator.
-func (it *SubvolumeIterator) GetNext() (*SubvolumeIteratorResult, error) {
-	if it.lastErr != nil {
-		return nil, it.lastErr
+// Next pulls the path and ID of the next subvolume from a SubvolumeIterator,
+// along with a bool which reports whether the pair is valid: it is false once
+// there are no subvolumes left or an error has occurred.
+//
+// Paths are relative to the subvolume ID used to create the iterator. Any error
+// is recorded in the iterator; see NewSubvolumeIterator and Err for details.
+func (si *SubvolumeIterator) Next() (string, uint64, bool) {
+	next, stop := iter.Pull2(si.ListSubvolumes())
+	defer stop()
+	return next()
+}
+
+// ListSubvolumeInfo returns an iter.Seq2 which yields the path and the
+// SubvolumeInfo of each (remaining) subvolume.
+//
+// Paths are relative to the subvolume ID used to create the iterator. Any error
+// is recorded in the iterator; see NewSubvolumeIterator and Err for details.
+func (si *SubvolumeIterator) ListSubvolumeInfo() iter.Seq2[string, *SubvolumeInfo] {
+	return func(yield func(string, *SubvolumeInfo) bool) {
+		for si.cPtr != nil {
+			var cPath *C.char
+			defer C.free(unsafe.Pointer(cPath))
+
+			var info C.struct_btrfs_util_subvolume_info
+
+			cError, err := C.btrfs_util_subvolume_iter_next_info(si.cPtr, &cPath, &info)
+			if cError != C.BTRFS_UTIL_OK {
+				si.err = wrapCError(cError, err)
+				return
+			}
+
+			if !yield(C.GoString(cPath), newSubvolumeInfo(&info)) {
+				return
+			}
+		}
 	}
-	return it.lastResult, it.lastErr
 }
 
-type SubvolumeInfoIterator struct {
-	lastResult *SubvolumeInfoIteratorResult
-	lastErr    error
-
-	iterator *C.struct_btrfs_util_subvolume_iterator
+// NextSubvolumeInfo pulls the path and the SubvolumeInfo of the next subvolume
+// from a SubvolumeIterator, along with a bool which reports whether the pair is
+// valid: it is false once there are no subvolumes left or an error has occurred.
+//
+// Paths are relative to the subvolume ID used to create the iterator. Any error
+// is recorded in the iterator; see NewSubvolumeIterator and Err for details.
+func (si *SubvolumeIterator) NextSubvolumeInfo() (string, *SubvolumeInfo, bool) {
+	next, stop := iter.Pull2(si.ListSubvolumeInfo())
+	defer stop()
+	return next()
 }
 
-// Identical to CreateSubvolumeIterator but GetNext() returns a SubvolumeInfo instead of a subvolume Id.
-// The returned SubvolumeInfoIterator struct must be freed with Destroy().
-func CreateSubvolumeInfoIterator(path string, top uint64, post_order bool) (*SubvolumeInfoIterator, error) {
-	it := new(SubvolumeInfoIterator)
+// Fd gets the file descriptor associated with a SubvolumeIterator.
+//
+// The iterator must not have been destroyed by Close.
+func (si *SubvolumeIterator) Fd() uintptr {
+	return uintptr(C.btrfs_util_subvolume_iterator_fd(si.cPtr))
+}
 
-	Cpath := C.CString(path)
-	defer C.free(unsafe.Pointer(Cpath))
-
-	flags := 0
-	if post_order {
-		flags |= C.BTRFS_UTIL_SUBVOLUME_ITERATOR_POST_ORDER
+// Err gets the last error recorded by a SubvolumeIterator, or nil if there is
+// none. Errors from iteration (ListSubvolumes, ListSubvolumeInfo, Next and
+// NextSubvolumeInfo) should be checked with Err after the iteration has finished.
+// The end-of-list marker ErrStopIteration is not reported as an error.
+func (si *SubvolumeIterator) Err() error {
+	if errors.Is(si.err, ErrStopIteration) {
+		return nil
 	}
-
-	err := getError(C.btrfs_util_create_subvolume_iterator(Cpath, C.uint64_t(top), C.int(flags), &it.iterator))
-
-	return it, err
+	return si.err
 }
 
-// See CreateSubvolumeInfoIterator.
-func CreateSubvolumeInfoIteratorFd(fd uintptr, top uint64, post_order bool) (*SubvolumeInfoIterator, error) {
-	it := new(SubvolumeInfoIterator)
-
-	flags := 0
-	if post_order {
-		flags |= C.BTRFS_UTIL_SUBVOLUME_ITERATOR_POST_ORDER
+// Close destroys the underlying C btrfs_util_subvolume_iterator and marks the
+// SubvolumeIterator as closed.
+//
+// Calling Close more than once has no effect.
+func (si *SubvolumeIterator) Close() {
+	if si.cPtr != nil {
+		C.btrfs_util_subvolume_iter_destroy(si.cPtr)
+		si.cPtr = nil
 	}
-
-	err := getError(C.btrfs_util_create_subvolume_iterator_fd(C.int(fd), C.uint64_t(top), C.int(flags), &it.iterator))
-	return it, err
-}
-
-// Fd returns the file descriptor referencing the SubvolumeInfoIterator
-func (it *SubvolumeInfoIterator) Fd() uintptr {
-	return uintptr(C.btrfs_util_subvolume_iterator_fd(it.iterator))
-}
-
-// Destroy destroys the SubvolumeInfoIterator.
-func (it *SubvolumeInfoIterator) Destroy() {
-	C.btrfs_util_destroy_subvolume_iterator(it.iterator)
-	it.iterator = nil
-}
-
-// HasNext returns true if the SubvolumeInfoIterator has a next value.
-func (it *SubvolumeInfoIterator) HasNext() bool {
-	var Cpath *C.char
-	defer C.free(unsafe.Pointer(Cpath))
-
-	var info C.struct_btrfs_util_subvolume_info
-	it.lastErr = getError(C.btrfs_util_subvolume_iterator_next_info(it.iterator, &Cpath, &info))
-	if it.lastErr == ErrStopIteration {
-		it.lastResult = nil
-		return false
-	}
-
-	it.lastResult = &SubvolumeInfoIteratorResult{C.GoString(Cpath), newSubvolumeInfo(&info)}
-	return true
-}
-
-// GetNext gets the Path and SubvolumeInfo of the next subvolume from a SubvolumeInfoIterator.
-func (it *SubvolumeInfoIterator) GetNext() (*SubvolumeInfoIteratorResult, error) {
-	if it.lastErr != nil {
-		return nil, it.lastErr
-	}
-	return it.lastResult, it.lastErr
 }
