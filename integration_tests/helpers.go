@@ -116,11 +116,11 @@ func (mp *mountPoint) path(subpath ...string) string {
 	return path.Join(append([]string{mp.file.Name()}, subpath...)...)
 }
 
-func (mp *mountPoint) fd() uintptr {
+func (mp *mountPoint) fd() int {
 	if mp.file == nil {
 		return 0
 	}
-	return mp.file.Fd()
+	return int(mp.file.Fd())
 }
 
 func setupTestFilesystem(subvolumes ...subvolume) (*mountPoint, error) {
@@ -170,10 +170,10 @@ func hasPrivileges() bool {
 	return os.Geteuid() == 0
 }
 
-func wrapFdTest(t *testing.T, targetPath string, testFunc func(t *testing.T, fd uintptr)) {
+func wrapFdTest(t *testing.T, targetPath string, testFunc func(t *testing.T, fd int)) {
 	t.Helper()
 
-	fd := ^uintptr(0)
+	fd := ^int(0)
 	if targetPath != "" {
 		f, err := os.Open(targetPath)
 		if err != nil {
@@ -182,7 +182,7 @@ func wrapFdTest(t *testing.T, targetPath string, testFunc func(t *testing.T, fd 
 		t.Cleanup(func() {
 			closeOpenedFile(t, f)
 		})
-		fd = f.Fd()
+		fd = int(f.Fd())
 	}
 
 	testFunc(t, fd)

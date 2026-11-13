@@ -121,7 +121,7 @@ func TestFsSync(t *testing.T) {
 	})
 
 	t.Run("invalid fd", func(t *testing.T) {
-		if err := FsSyncFd(^uintptr(0)); !errors.Is(err, ErrSyncFailed) {
+		if err := FsSyncFd(^int(0)); !errors.Is(err, ErrSyncFailed) {
 			t.Errorf("want %v, got %v", ErrSyncFailed, err)
 		}
 	})

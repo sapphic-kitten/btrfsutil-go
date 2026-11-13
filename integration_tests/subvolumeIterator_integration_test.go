@@ -66,7 +66,7 @@ func TestNewSubvolumeIteratorFd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wrapFdTest(t, tt.path, func(t *testing.T, fd uintptr) {
+			wrapFdTest(t, tt.path, func(t *testing.T, fd int) {
 				iter, err := btrfsutil.NewSubvolumeIteratorFd(fd, tt.topId, tt.postOrder)
 				t.Cleanup(iter.Close)
 				if !errors.Is(err, tt.err) {

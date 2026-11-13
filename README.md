@@ -27,7 +27,6 @@ err := btrfsutil.FsSync("/mnt/btrfs")
 
 The bindings mirror libbtrfsutil almost 1:1. Every C function and type has a Go counterpart.
 Function and type names are derived from their names in C.
-Variants ending in `…Fd` take a file descriptor as `uintptr` (as returned by `os.File.Fd()`) instead of a C `int`.
 
 `SubvolumeInfo` mirrors `struct btrfs_util_subvolume_info`. The following fields have been converted to Go types:
 

@@ -77,7 +77,7 @@ func NewSubvolumeIterator(path string, topId uint64, postOrder bool) (*Subvolume
 //
 // fd may be the file descriptor for any object on the filesystem.
 // See NewSubvolumeIterator for details.
-func NewSubvolumeIteratorFd(fd uintptr, topId uint64, postOrder bool) (*SubvolumeIterator, error) {
+func NewSubvolumeIteratorFd(fd int, topId uint64, postOrder bool) (*SubvolumeIterator, error) {
 	si := new(SubvolumeIterator)
 
 	flags := 0
@@ -168,8 +168,8 @@ func (si *SubvolumeIterator) NextSubvolumeInfo() (string, *SubvolumeInfo, bool) 
 // Fd gets the file descriptor associated with a SubvolumeIterator.
 //
 // The iterator must not have been destroyed by Close.
-func (si *SubvolumeIterator) Fd() uintptr {
-	return uintptr(C.btrfs_util_subvolume_iterator_fd(si.cPtr))
+func (si *SubvolumeIterator) Fd() int {
+	return int(C.btrfs_util_subvolume_iterator_fd(si.cPtr))
 }
 
 // Err gets the last error recorded by a SubvolumeIterator, or nil if there is

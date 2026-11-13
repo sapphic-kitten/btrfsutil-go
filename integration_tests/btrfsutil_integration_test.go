@@ -72,7 +72,7 @@ func TestFsSyncFd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wrapFdTest(t, tt.path, func(t *testing.T, fd uintptr) {
+			wrapFdTest(t, tt.path, func(t *testing.T, fd int) {
 				if err := btrfsutil.FsSyncFd(fd); !errors.Is(err, tt.err) {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -135,7 +135,7 @@ func TestSubvolumeIsValidFd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wrapFdTest(t, tt.path, func(t *testing.T, fd uintptr) {
+			wrapFdTest(t, tt.path, func(t *testing.T, fd int) {
 				got, err := btrfsutil.SubvolumeIsValidFd(fd)
 				if !errors.Is(err, tt.err) {
 					t.Fatalf("unexpected error: %v", err)
@@ -184,7 +184,7 @@ func TestSubvolumeGetIdFd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wrapFdTest(t, tt.path, func(t *testing.T, fd uintptr) {
+			wrapFdTest(t, tt.path, func(t *testing.T, fd int) {
 				got, err := btrfsutil.SubvolumeGetIdFd(fd)
 				if !errors.Is(err, tt.err) {
 					t.Fatalf("unexpected error: %v", err)
@@ -237,7 +237,7 @@ func TestSubvolumeGetPathFd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wrapFdTest(t, tt.path, func(t *testing.T, fd uintptr) {
+			wrapFdTest(t, tt.path, func(t *testing.T, fd int) {
 				got, err := btrfsutil.SubvolumeGetPathFd(fd, tt.id)
 				if !errors.Is(err, tt.err) {
 					t.Fatalf("unexpected error: %v", err)
@@ -320,7 +320,7 @@ func TestSubvolumeGetInfoFd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wrapFdTest(t, tt.path, func(t *testing.T, fd uintptr) {
+			wrapFdTest(t, tt.path, func(t *testing.T, fd int) {
 				info, err := btrfsutil.SubvolumeGetInfoFd(fd, tt.id)
 				if !errors.Is(err, tt.err) {
 					t.Fatalf("unexpected error: %v", err)
@@ -373,7 +373,7 @@ func TestSubvolumeGetReadOnlyFd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wrapFdTest(t, tt.path, func(t *testing.T, fd uintptr) {
+			wrapFdTest(t, tt.path, func(t *testing.T, fd int) {
 				got, err := btrfsutil.SubvolumeGetReadOnlyFd(fd)
 				if !errors.Is(err, tt.err) {
 					t.Fatalf("unexpected error: %v", err)
@@ -433,7 +433,7 @@ func TestSubvolumeSetReadOnlyFd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wrapFdTest(t, tt.path, func(t *testing.T, fd uintptr) {
+			wrapFdTest(t, tt.path, func(t *testing.T, fd int) {
 				if err := btrfsutil.SubvolumeSetReadOnlyFd(fd, tt.readOnly); !errors.Is(err, tt.want) {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -489,7 +489,7 @@ func TestSubvolumeGetDefaultFd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wrapFdTest(t, tt.path, func(t *testing.T, fd uintptr) {
+			wrapFdTest(t, tt.path, func(t *testing.T, fd int) {
 				got, err := btrfsutil.SubvolumeGetDefaultFd(fd)
 				if !errors.Is(err, tt.err) {
 					t.Fatalf("unexpected error: %v", err)
@@ -551,7 +551,7 @@ func TestSubvolumeSetDefaultFd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wrapFdTest(t, tt.path, func(t *testing.T, fd uintptr) {
+			wrapFdTest(t, tt.path, func(t *testing.T, fd int) {
 				if err := btrfsutil.SubvolumeSetDefaultFd(fd, tt.id); !errors.Is(err, tt.err) {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -594,12 +594,12 @@ func TestSubvolumeCreateFd(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		parentFd   uintptr
+		parentFd   int
 		subvolName string
 		err        error
 	}{
 		{"ok", mp.fd(), "subvolume1", nil},
-		{"invalid parentFd", ^uintptr(0), "will_not_create", syscall.EBADF},
+		{"invalid parentFd", ^int(0), "will_not_create", syscall.EBADF},
 	}
 
 	for _, tt := range tests {
@@ -665,19 +665,20 @@ func TestSubvolumeSnapshotFd(t *testing.T) {
 		t.Fatalf("failed to open %q: %v", subvolPath, err)
 	}
 	t.Cleanup(func() { closeOpenedFile(t, f) })
+	fd := int(f.Fd())
 
 	tests := []struct {
 		name      string
-		fd        uintptr
+		fd        int
 		recursive bool
 		readOnly  bool
 		err       error
 	}{
-		{"non-recursive, rw", f.Fd(), false, false, nil},
-		{"recursive, rw", f.Fd(), true, false, nil},
-		{"non-recursive, ro", f.Fd(), false, true, nil},
-		{"recursive, ro", f.Fd(), true, true, syscall.EINVAL},
-		{"invalid fd", ^uintptr(0), false, false, syscall.EINVAL},
+		{"non-recursive, rw", fd, false, false, nil},
+		{"recursive, rw", fd, true, false, nil},
+		{"non-recursive, ro", fd, false, true, nil},
+		{"recursive, ro", fd, true, true, syscall.EINVAL},
+		{"invalid fd", ^int(0), false, false, syscall.EINVAL},
 	}
 
 	for i, tt := range tests {
@@ -700,21 +701,22 @@ func TestSubvolumeSnapshotFd2(t *testing.T) {
 		t.Fatalf("failed to open %q: %v", subvolPath, err)
 	}
 	t.Cleanup(func() { closeOpenedFile(t, f) })
+	fd := int(f.Fd())
 
 	tests := []struct {
 		name      string
-		fd        uintptr
-		parentFd  uintptr
+		fd        int
+		parentFd  int
 		recursive bool
 		readOnly  bool
 		err       error
 	}{
-		{"non-recursive, rw", f.Fd(), mp.fd(), false, false, nil},
-		{"recursive, rw", f.Fd(), mp.fd(), true, false, nil},
-		{"non-recursive, ro", f.Fd(), mp.fd(), false, true, nil},
-		{"recursive, ro", f.Fd(), mp.fd(), true, true, syscall.EINVAL},
-		{"invalid fd", ^uintptr(0), mp.fd(), false, false, syscall.EINVAL},
-		{"invalid parentFd", f.Fd(), ^uintptr(0), false, false, syscall.EBADF},
+		{"non-recursive, rw", fd, mp.fd(), false, false, nil},
+		{"recursive, rw", fd, mp.fd(), true, false, nil},
+		{"non-recursive, ro", fd, mp.fd(), false, true, nil},
+		{"recursive, ro", fd, mp.fd(), true, true, syscall.EINVAL},
+		{"invalid fd", ^int(0), mp.fd(), false, false, syscall.EINVAL},
+		{"invalid parentFd", fd, ^int(0), false, false, syscall.EBADF},
 	}
 
 	for i, tt := range tests {
@@ -767,7 +769,7 @@ func TestSubvolumeDeleteFd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wrapFdTest(t, tt.parentPath, func(t *testing.T, fd uintptr) {
+			wrapFdTest(t, tt.parentPath, func(t *testing.T, fd int) {
 				if err := btrfsutil.SubvolumeDeleteFd(fd, tt.subvolumeName, tt.recursive); !errors.Is(err, tt.err) {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -791,7 +793,7 @@ func TestSubvolumeDeleteByIdFd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			wrapFdTest(t, tt.parentPath, func(t *testing.T, fd uintptr) {
+			wrapFdTest(t, tt.parentPath, func(t *testing.T, fd int) {
 				if err := btrfsutil.SubvolumeDeleteByIdFd(fd, tt.id); !errors.Is(err, tt.err) {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -838,7 +840,7 @@ func TestSubvolumeListDeletedFd(t *testing.T) {
 	})
 
 	t.Run("invalid fd", func(t *testing.T) {
-		if _, err := btrfsutil.SubvolumeListDeletedFd(^uintptr(0)); !errors.Is(err, syscall.EBADF) {
+		if _, err := btrfsutil.SubvolumeListDeletedFd(^int(0)); !errors.Is(err, syscall.EBADF) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
